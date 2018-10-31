@@ -1,0 +1,332 @@
+<html lang="en">
+  <head>
+    <title>Cannon.js Benchmark</title>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0">
+    <style>
+      body {
+        color: #61443e;
+        font-family:Monospace;
+        font-size:13px;
+        text-align:center;
+
+        background-color: #bfd1e5;
+        margin: 0px;
+        overflow: hidden;
+      }
+
+      #info {
+        position: absolute;
+        top: 0px; width: 100%;
+        padding: 5px;
+      }
+
+      a {
+
+        color: #a06851;
+      }
+
+    </style>
+  </head>
+  <body>
+    <div id="info">Cannon.js Benchmark</div>
+    <div id="container"><br /><br /><br /><br /><br />Loading...</div>
+
+    <script src="./js/cannon/cannon.js"></script>
+    <script src="./js/three/three.min.js"></script>
+    <script src="./js/three/GLTFLoader.js"></script>
+    <!-- <script src="./js/three/CannonDebugRenderer.js"></script> -->
+    <script src="./js/three/OrbitControls.js"></script>
+    <script src="./js/three/Detector.js"></script>
+    <script src="./js/three/stats.min.js"></script>
+
+    <script>
+
+    // - Global variables -
+    var numObjects = 75;
+
+    // Graphics variables
+    var container, stats;
+    var camera, controls, scene, renderer;
+    var textureLoader;
+    var clock = new THREE.Clock();
+
+    // Physics variables
+    var gravityConstant = -9.8;
+    var physicsWorld;
+    var rigidBodies = [];
+    var margin = 0.05;
+
+    var time = 0;
+
+    // Loader variables
+    var loader = new THREE.GLTFLoader();
+    var modelScale = 5;
+    var modelRootScale;
+    var model;
+    var collision;
+    var collisionPoints;
+    var collisionFaces;
+
+    // - Main code -
+
+    init();
+
+    // var cannonDebugRenderer = new THREE.CannonDebugRenderer( scene, physicsWorld );
+
+    animate();
+
+
+    // - Functions -
+
+    function init() {
+
+      initGraphics();
+
+      initPhysics();
+
+      initLoader();
+
+      // createObjects();
+
+      // startLoop();
+
+    }
+
+    function initGraphics() {
+
+      container = document.getElementById( 'container' );
+
+      camera = new THREE.PerspectiveCamera( 60, window.innerWidth / window.innerHeight, 0.2, 2000 );
+
+      scene = new THREE.Scene();
+
+      camera.position.x = -12;
+      camera.position.y = 7;
+      camera.position.z =  4;
+
+      controls = new THREE.OrbitControls( camera );
+      controls.target.y = 2;
+
+      renderer = new THREE.WebGLRenderer();
+      renderer.setClearColor( 0xbfd1e5 );
+      renderer.setPixelRatio( window.devicePixelRatio );
+      renderer.setSize( window.innerWidth, window.innerHeight );
+      renderer.shadowMap.enabled = true;
+
+      textureLoader = new THREE.TextureLoader();
+
+      var ambientLight = new THREE.AmbientLight( 0x404040 );
+      scene.add( ambientLight );
+
+      var light = new THREE.DirectionalLight( 0xffffff, 1 );
+      light.position.set( -7, 10, 15 );
+      light.castShadow = true;
+      var d = 10;
+      light.shadow.camera.left = -d;
+      light.shadow.camera.right = d;
+      light.shadow.camera.top = d;
+      light.shadow.camera.bottom = -d;
+
+      light.shadow.camera.near = 2;
+      light.shadow.camera.far = 50;
+
+      light.shadow.mapSize.x = 1024;
+      light.shadow.mapSize.y = 1024;
+      
+      light.shadow.bias = -0.01;
+
+      scene.add( light );
+
+      container.innerHTML = 
+      "<br /><br /><br /><br /><br />Number of objects: " + numObjects;
+
+      container.appendChild( renderer.domElement );
+
+      stats = new Stats();
+      stats.domElement.style.position = 'absolute';
+      stats.domElement.style.top = '0px';
+      container.appendChild( stats.domElement );
+
+      window.addEventListener( 'resize', onWindowResize, false );
+
+    }
+
+    function initPhysics() {
+      // Physics configuration
+      physicsWorld = new CANNON.World();
+      physicsWorld.gravity.set(0, gravityConstant, 0);
+      physicsWorld.broadphase = new CANNON.NaiveBroadphase();
+      physicsWorld.allowSleep = false;
+      physicsWorld.solver.iterations = 10;
+    }
+
+    function initLoader() {
+      loader.load('./models/DuckyCombinedMesh.glb', ( gltf ) => { 
+          var root = gltf.scene.children[0].children[0];
+        model = root.children[0];
+        collision = root.children[1];
+
+        modelRootScale = root.scale;
+
+        var geometry = new THREE.Geometry().fromBufferGeometry(collision.geometry);
+        // var geometry = new THREE.BoxGeometry(0.5, 0.5, 0.5);
+        geometry.scale(modelRootScale.x * modelScale, modelRootScale.y * modelScale, modelRootScale.z * modelScale)
+
+        collisionPoints = geometry.vertices.map(function(v) {
+            return new CANNON.Vec3( v.x, v.y, v.z )
+        });
+        collisionFaces = geometry.faces.map(function(f) {
+            return [f.a, f.b, f.c]
+        });
+
+        createObjects();
+
+        startLoop();
+      });
+    }
+
+    function createObjects() {
+
+      var pos = new THREE.Vector3();
+      var quat = new THREE.Quaternion();
+
+      // Ground
+      pos.set( 0, - 0.5, 0 );
+      quat.set( 0, 0, 0, 1 );
+      var ground = createParalellepiped( 40, 1, 40, 0, pos, quat, new THREE.MeshPhongMaterial( { color: 0xFFFFFF } ) );
+      // Boxes
+      var boxSize = 0.5;
+      var boxMass = 1;
+      for (var z = 0; z < 4 * numObjects/100; z++) {
+        for (var y = 0; y < 5; y++) {
+          for (var x = 0; x < 5; x++) {
+            var height = 5 + z * 1;
+            var width = x - 5 + Math.random() * 0.5;
+            var depth = y - 5 + Math.random() * 0.5;
+            pos.set( width, height, depth );
+            createParalellepiped2( boxSize, boxSize, boxSize, boxMass, pos, quat, new THREE.MeshPhongMaterial( { color: createRandomColor() }) );
+          }
+        }
+      }
+    }
+
+    function createParalellepiped( sx, sy, sz, mass, pos, quat, material ) {
+      var threeObject = new THREE.Mesh( new THREE.BoxGeometry(sx, sy, sz), material );
+      var shape = new CANNON.Box(new CANNON.Vec3(sx/2, sy/2, sz/2));
+
+      createRigidBody( threeObject, shape, mass, pos, quat );
+
+      return threeObject;
+
+    }
+
+    function createParalellepiped2( sx, sy, sz, mass, pos, quat, material ) {
+      var threeObject = model.clone();
+      threeObject.scale.set(modelRootScale.x * modelScale, modelRootScale.y * modelScale, modelRootScale.z * modelScale);
+      // var threeObject = new THREE.Mesh( new THREE.BoxGeometry(sx, sy, sz), material );
+      var shape = new CANNON.ConvexPolyhedron(collisionPoints, collisionFaces);
+
+      createRigidBody( threeObject, shape, mass, pos, quat );
+
+      return threeObject;
+
+    }
+
+    function createRigidBody( threeObject, physicsShape, mass, pos, quat ) {
+
+      threeObject.position.copy( pos );
+      threeObject.quaternion.copy( quat );
+
+      var body = new CANNON.Body({mass: mass, allowSleep: false, type: mass > 0 ? 1 : 2});
+      body.addShape(physicsShape);
+
+      body.position.copy(pos);
+      body.quaternion.copy(quat);
+
+      threeObject.userData.physicsBody = body;
+
+      scene.add( threeObject );
+
+      if ( mass > 0 ) {
+        rigidBodies.push( threeObject );
+      }
+
+      physicsWorld.addBody( body );
+
+    }
+
+    function createRandomColor() {
+      return Math.floor( Math.random() * ( 1 << 24 ) );
+    }
+
+    function startLoop() {
+      var index = 0;
+      window.setInterval(() => {
+        var i = 0;
+        for (var y = 0; y < 5; y++) {
+          for (var x = 0; x < 5; x++) {
+            var width = x - 5 + Math.random() * 0.5;
+            var depth = y - 5 + Math.random() * 0.5;
+            var body = rigidBodies[index + i].userData.physicsBody;
+            body.position.set(width, 5, depth);
+            body.quaternion.set(0, 0, 0, 1);
+            i++;
+          }
+        }
+
+        index = (index + 25 ) % rigidBodies.length;
+      }, 1000);
+    }
+
+    function onWindowResize() {
+
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+
+      renderer.setSize( window.innerWidth, window.innerHeight );
+
+    }
+
+    function animate() {
+
+      requestAnimationFrame( animate );
+
+      render();
+      stats.update();
+
+    }
+
+    function render() {
+
+      var deltaTime = clock.getDelta();
+
+      updatePhysics( deltaTime );
+
+      // cannonDebugRenderer.update();
+
+      controls.update( deltaTime );
+
+      renderer.render( scene, camera );
+
+      time += deltaTime;
+
+    }
+
+    function updatePhysics( deltaTime ) {
+      // Step world
+      physicsWorld.step(deltaTime, 0, 10);
+
+      // Update rigid bodies
+      for ( var i = 0, il = rigidBodies.length; i < il; i++ ) {
+        var objThree = rigidBodies[ i ];
+        var objPhys = objThree.userData.physicsBody;
+        objThree.position.copy(objPhys.position);
+        objThree.quaternion.copy(objPhys.quaternion);
+      }
+    }
+
+    </script>
+
+  </body>
+</html>
